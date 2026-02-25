@@ -38,6 +38,19 @@ import org.junit.jupiter.params.provider.MethodSource;
 /** Tests for {@link ExpressionUtils}. */
 public class ExpressionUtilsTest {
 
+  /** A custom Filter subclass never recognized by ExpressionUtils, used only in tests. */
+  private static final class UnsupportedFilter extends Filter {
+    @Override
+    public String[] references() {
+      return new String[0];
+    }
+
+    @Override
+    public org.apache.spark.sql.connector.expressions.filter.Predicate toV2() {
+      throw new UnsupportedOperationException("UnsupportedFilter.toV2()");
+    }
+  }
+
   // Test data provider for comparison filters
   static Stream<Arguments> comparisonFiltersProvider() {
     return Stream.of(
@@ -140,12 +153,101 @@ public class ExpressionUtilsTest {
   }
 
   @Test
-  public void testUnsupportedFilter() {
-    // Create an unsupported filter (StringContains is not implemented in our conversion method)
-    Filter unsupportedFilter = new StringContains("col1", "test");
-
+  public void testStringEndsWithFilter() {
+    StringEndsWith filter = new StringEndsWith("name", "bar");
     ExpressionUtils.ConvertedPredicate result =
-        ExpressionUtils.convertSparkFilterToKernelPredicate(unsupportedFilter);
+        ExpressionUtils.convertSparkFilterToKernelPredicate(filter);
+
+    assertTrue(result.isPresent(), "StringEndsWith filter should be converted");
+    assertFalse(result.isPartial(), "StringEndsWith filter should be fully converted");
+    assertEquals("ENDS_WITH", result.get().getName());
+    assertEquals(2, result.get().getChildren().size());
+  }
+
+  @Test
+  public void testStringEndsWithFilter_emptySuffix() {
+    StringEndsWith filter = new StringEndsWith("name", "");
+    ExpressionUtils.ConvertedPredicate result =
+        ExpressionUtils.convertSparkFilterToKernelPredicate(filter);
+
+    assertTrue(result.isPresent(), "StringEndsWith with empty suffix should be converted");
+    assertEquals("ENDS_WITH", result.get().getName());
+  }
+
+  @Test
+  public void testStringEndsWithFilter_insideAnd() {
+    org.apache.spark.sql.sources.And andFilter =
+        new org.apache.spark.sql.sources.And(
+            new EqualTo("id", 1), new StringEndsWith("name", "bar"));
+    ExpressionUtils.ConvertedPredicate result =
+        ExpressionUtils.convertSparkFilterToKernelPredicate(andFilter);
+
+    assertTrue(result.isPresent(), "AND(EqualTo, StringEndsWith) should be converted");
+    assertFalse(result.isPartial(), "AND(EqualTo, StringEndsWith) should be fully converted");
+    assertTrue(result.get() instanceof io.delta.kernel.expressions.And);
+  }
+
+  @Test
+  public void testStringEndsWithFilter_insideNot() {
+    Not notFilter = new Not(new StringEndsWith("name", "bar"));
+    ExpressionUtils.ConvertedPredicate result =
+        ExpressionUtils.convertSparkFilterToKernelPredicate(notFilter);
+
+    assertTrue(result.isPresent(), "NOT(StringEndsWith) should be converted");
+    assertFalse(result.isPartial(), "NOT(StringEndsWith) should be fully converted");
+    assertEquals("NOT", result.get().getName());
+  }
+
+  @Test
+  public void testStringContainsFilter() {
+    StringContains filter = new StringContains("name", "foo");
+    ExpressionUtils.ConvertedPredicate result =
+        ExpressionUtils.convertSparkFilterToKernelPredicate(filter);
+
+    assertTrue(result.isPresent(), "StringContains filter should be converted");
+    assertFalse(result.isPartial(), "StringContains filter should be fully converted");
+    assertEquals("CONTAINS", result.get().getName());
+    assertEquals(2, result.get().getChildren().size());
+  }
+
+  @Test
+  public void testStringContainsFilter_emptySubstring() {
+    StringContains filter = new StringContains("name", "");
+    ExpressionUtils.ConvertedPredicate result =
+        ExpressionUtils.convertSparkFilterToKernelPredicate(filter);
+
+    assertTrue(result.isPresent(), "StringContains with empty substring should be converted");
+    assertEquals("CONTAINS", result.get().getName());
+  }
+
+  @Test
+  public void testStringContainsFilter_insideAnd() {
+    org.apache.spark.sql.sources.And andFilter =
+        new org.apache.spark.sql.sources.And(
+            new EqualTo("id", 1), new StringContains("name", "foo"));
+    ExpressionUtils.ConvertedPredicate result =
+        ExpressionUtils.convertSparkFilterToKernelPredicate(andFilter);
+
+    assertTrue(result.isPresent(), "AND(EqualTo, StringContains) should be converted");
+    assertFalse(result.isPartial(), "AND(EqualTo, StringContains) should be fully converted");
+    assertTrue(result.get() instanceof io.delta.kernel.expressions.And);
+  }
+
+  @Test
+  public void testStringContainsFilter_insideNot() {
+    Not notFilter = new Not(new StringContains("name", "foo"));
+    ExpressionUtils.ConvertedPredicate result =
+        ExpressionUtils.convertSparkFilterToKernelPredicate(notFilter);
+
+    assertTrue(result.isPresent(), "NOT(StringContains) should be converted");
+    assertFalse(result.isPartial(), "NOT(StringContains) should be fully converted");
+    assertEquals("NOT", result.get().getName());
+  }
+
+  @Test
+  public void testUnsupportedFilter() {
+    ExpressionUtils.ConvertedPredicate result =
+        ExpressionUtils.convertSparkFilterToKernelPredicate(new UnsupportedFilter());
     assertFalse(result.isPresent(), "Unsupported filters should return empty Optional");
     assertFalse(result.isPartial(), "Unsupported filters should not be marked as partial");
   }
@@ -172,7 +274,7 @@ public class ExpressionUtilsTest {
   public void testAndFilter_PartialPushDownWithLeftConvertible() {
     // Create an AND filter where left can be converted but right cannot
     EqualTo leftFilter = new EqualTo("id", 1);
-    Filter unsupportedRightFilter = new StringContains("unsupported_col", "test");
+    Filter unsupportedRightFilter = new UnsupportedFilter();
 
     org.apache.spark.sql.sources.And andFilter =
         new org.apache.spark.sql.sources.And(leftFilter, unsupportedRightFilter);
@@ -201,7 +303,7 @@ public class ExpressionUtilsTest {
   @Test
   public void testAndFilter_PartialPushDownWithRightConvertible() {
     // Create an AND filter where right can be converted but left cannot
-    Filter unsupportedLeftFilter = new StringContains("unsupported_col", "test");
+    Filter unsupportedLeftFilter = new UnsupportedFilter();
     GreaterThan rightFilter = new GreaterThan("age", 18);
     org.apache.spark.sql.sources.And andFilter =
         new org.apache.spark.sql.sources.And(unsupportedLeftFilter, rightFilter);
@@ -226,8 +328,8 @@ public class ExpressionUtilsTest {
   @Test
   public void testAndFilter_PartialPushDown_BothUnconvertible() {
     // Create an AND filter where neither side can be converted
-    Filter unsupportedLeftFilter = new StringContains("unsupported_col1", "test");
-    Filter unsupportedRightFilter = new StringContains("unsupported_col2", "test");
+    Filter unsupportedLeftFilter = new UnsupportedFilter();
+    Filter unsupportedRightFilter = new UnsupportedFilter();
     org.apache.spark.sql.sources.And andFilter =
         new org.apache.spark.sql.sources.And(unsupportedLeftFilter, unsupportedRightFilter);
 
@@ -243,7 +345,7 @@ public class ExpressionUtilsTest {
   public void testOrFilter_RequiresBothConvertible() {
     // Create an OR filter where left can be converted but right cannot
     EqualTo leftFilter = new EqualTo("id", 1);
-    Filter unsupportedRightFilter = new StringContains("unsupported_col", "test");
+    Filter unsupportedRightFilter = new UnsupportedFilter();
 
     org.apache.spark.sql.sources.Or orFilter =
         new org.apache.spark.sql.sources.Or(leftFilter, unsupportedRightFilter);
@@ -272,8 +374,7 @@ public class ExpressionUtilsTest {
 
   @Test
   public void testNotFilter_RequiresChildConvertible() {
-    // StringContains is not yet supported
-    Filter unsupportedFilter = new StringContains("unsupported_col", "test");
+    Filter unsupportedFilter = new UnsupportedFilter();
 
     Not notFilter = new Not(unsupportedFilter);
 

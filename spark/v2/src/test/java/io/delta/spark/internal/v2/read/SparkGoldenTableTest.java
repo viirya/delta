@@ -200,16 +200,19 @@ public class SparkGoldenTableTest {
         },
         // expected post-scan filters
         new Filter[] {
-          new GreaterThan("cnt", 10),
-          new StringStartsWith("name", "foo"),
-          new StringEndsWith("city", "York"),
+          new GreaterThan("cnt", 10), new StringStartsWith("name", "foo"),
         },
         // expected pushed filters
-        new Filter[] {new GreaterThan("cnt", 10), new EqualTo("date", "2025-09-01")},
+        new Filter[] {
+          new GreaterThan("cnt", 10),
+          new EqualTo("date", "2025-09-01"),
+          new StringEndsWith("city", "York")
+        },
         // expected pushed kernel predicates
         new Predicate[] {
           new Predicate(">", new Column("cnt"), Literal.ofInt(10)),
-          new Predicate("=", new Column("date"), Literal.ofString("2025-09-01"))
+          new Predicate("=", new Column("date"), Literal.ofString("2025-09-01")),
+          new Predicate("ENDS_WITH", new Column("city"), Literal.ofString("York"))
         },
         // expected data filters
         new Filter[] {new GreaterThan("cnt", 10), new StringStartsWith("name", "foo")},
@@ -217,8 +220,11 @@ public class SparkGoldenTableTest {
         Optional.of(
             new Predicate(
                 "AND",
-                new Predicate(">", new Column("cnt"), Literal.ofInt(10)),
-                new Predicate("=", new Column("date"), Literal.ofString("2025-09-01")))));
+                new Predicate(
+                    "AND",
+                    new Predicate(">", new Column("cnt"), Literal.ofInt(10)),
+                    new Predicate("=", new Column("date"), Literal.ofString("2025-09-01"))),
+                new Predicate("ENDS_WITH", new Column("city"), Literal.ofString("York")))));
 
     // case 2: OR and NOT filters
     checkSupportsPushDownFilters(

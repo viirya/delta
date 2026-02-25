@@ -57,6 +57,7 @@ public final class ExpressionUtils {
    *   <li>Null tests: IsNull, IsNotNull
    *   <li>Null-safe comparison: EqualNullSafe
    *   <li>Logical operators: And, Or, Not
+   *   <li>String functions: StringEndsWith, StringContains
    * </ul>
    *
    * @param filter the Spark SQL filter to convert
@@ -129,6 +130,19 @@ public final class ExpressionUtils {
       IsNotNull f = (IsNotNull) filter;
       return new ConvertedPredicate(
           Optional.of(new Predicate("IS_NOT_NULL", kernelColumn(f.attribute()))));
+    }
+    if (filter instanceof StringEndsWith) {
+      StringEndsWith f = (StringEndsWith) filter;
+      return new ConvertedPredicate(
+          Optional.of(
+              new Predicate(
+                  "ENDS_WITH", kernelColumn(f.attribute()), Literal.ofString(f.value()))));
+    }
+    if (filter instanceof StringContains) {
+      StringContains f = (StringContains) filter;
+      return new ConvertedPredicate(
+          Optional.of(
+              new Predicate("CONTAINS", kernelColumn(f.attribute()), Literal.ofString(f.value()))));
     }
     if (filter instanceof org.apache.spark.sql.sources.And) {
       org.apache.spark.sql.sources.And f = (org.apache.spark.sql.sources.And) filter;

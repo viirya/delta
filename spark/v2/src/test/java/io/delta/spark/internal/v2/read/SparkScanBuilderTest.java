@@ -320,17 +320,18 @@ public class SparkScanBuilderTest extends DeltaV2TestBase {
         new Filter[] {
           new EqualTo("id", 100), // data filter, supported
           new StringStartsWith("name", "foo"), // data filter, unsupported
-          new StringEndsWith("dep_id", "1") // partition filter, unsupported
         },
         // expected pushed filters
         new Filter[] {
           new EqualTo("id", 100), // data filter, supported
-          new GreaterThan("dep_id", 1) // partition filter, supported
+          new GreaterThan("dep_id", 1), // partition filter, supported
+          new StringEndsWith("dep_id", "1") // partition filter, supported
         },
         // expected pushed kernel predicates
         new Predicate[] {
           new Predicate("=", new Column("id"), Literal.ofInt(100)),
-          new Predicate(">", new Column("dep_id"), Literal.ofInt(1))
+          new Predicate(">", new Column("dep_id"), Literal.ofInt(1)),
+          new Predicate("ENDS_WITH", new Column("dep_id"), Literal.ofString("1"))
         },
         // expected data filters
         new Filter[] {
@@ -341,9 +342,11 @@ public class SparkScanBuilderTest extends DeltaV2TestBase {
         Optional.of(
             new Predicate(
                 "AND",
-                Arrays.asList(
+                new Predicate(
+                    "AND",
                     new Predicate("=", new Column("id"), Literal.ofInt(100)),
-                    new Predicate(">", new Column("dep_id"), Literal.ofInt(1))))));
+                    new Predicate(">", new Column("dep_id"), Literal.ofInt(1))),
+                new Predicate("ENDS_WITH", new Column("dep_id"), Literal.ofString("1")))));
   }
 
   @Test
@@ -559,16 +562,32 @@ public class SparkScanBuilderTest extends DeltaV2TestBase {
         builder,
         // input filters
         new Filter[] {new Not(new And(new EqualTo("id", 100), new StringEndsWith("name", "bar")))},
-        // expected post-scan filters
+        // expected post-scan filters (data filter - references "name", not a partition column)
         new Filter[] {new Not(new And(new EqualTo("id", 100), new StringEndsWith("name", "bar")))},
         // expected pushed filters
-        new Filter[] {},
+        new Filter[] {new Not(new And(new EqualTo("id", 100), new StringEndsWith("name", "bar")))},
         // expected pushed kernel predicates
-        new Predicate[] {},
+        new Predicate[] {
+          new Predicate(
+              "NOT",
+              new Predicate(
+                  "AND",
+                  Arrays.asList(
+                      new Predicate("=", new Column("id"), Literal.ofInt(100)),
+                      new Predicate("ENDS_WITH", new Column("name"), Literal.ofString("bar")))))
+        },
         // expected data filters
         new Filter[] {new Not(new And(new EqualTo("id", 100), new StringEndsWith("name", "bar")))},
         // expected kernelScanBuilder.predicate
-        Optional.empty());
+        Optional.of(
+            new Predicate(
+                "NOT",
+                new Predicate(
+                    "AND",
+                    Arrays.asList(
+                        new Predicate("=", new Column("id"), Literal.ofInt(100)),
+                        new Predicate(
+                            "ENDS_WITH", new Column("name"), Literal.ofString("bar")))))));
   }
 
   @Test
